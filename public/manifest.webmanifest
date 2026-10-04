@@ -1,0 +1,25 @@
+{
+  "name": "FitTrack",
+  "short_name": "FitTrack",
+  "description": "Seguimiento personal de calorias y macronutrientes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f5fb",
+  "theme_color": "#f3f5fb",
+  "icons": [
+    {
+      "src": "/fittrack-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/fittrack-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
