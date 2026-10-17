@@ -899,6 +899,16 @@ function AddMealTab({
     entryMode: 'total' | 'items';
     items: FrequentMeal['items'];
   } | null>(null);
+  const [frequentPortionDraft, setFrequentPortionDraft] = useState<{
+    source: FrequentMeal;
+    name: string;
+    mealType: MealEntry['mealType'];
+    weightGrams: string;
+    calories: string;
+    protein: string;
+    carbs: string;
+    fats: string;
+  } | null>(null);
   const analysisMorph = useRef(new Animated.Value(0)).current;
   const frequentPressAnim = useRef(new Animated.Value(0)).current;
 
@@ -1033,39 +1043,91 @@ function AddMealTab({
     persistFrequentMeal(payload);
   };
 
+  const getFrequentBaseWeight = (frequentMeal: FrequentMeal): number => {
+    if (frequentMeal.weightGrams > 0) {
+      return frequentMeal.weightGrams;
+    }
+    return frequentMeal.items.reduce((total, item) => total + Math.max(0, item.weightGrams), 0);
+  };
+
+  const formatPortionValue = (value: number): string => {
+    return String(Math.round(value * 10) / 10);
+  };
+
   const applyFrequentMeal = (frequentMeal: FrequentMeal) => {
-    setName(frequentMeal.name);
-    setMealType(frequentMeal.mealType);
-    setWeightGrams(String(Math.round(frequentMeal.weightGrams || 0)));
-    setProtein(String(Math.round(frequentMeal.protein || 0)));
-    setCarbs(String(Math.round(frequentMeal.carbs || 0)));
-    setFats(String(Math.round(frequentMeal.fats || 0)));
-    setCalories(String(Math.round(frequentMeal.calories || 0)));
-    setEntryMode(frequentMeal.entryMode);
-    setShowDetailedMacros(frequentMeal.entryMode === 'items');
-    setShowFrequentPrompt(false);
-    setFrequentDraftName('');
-    setMealItems(
-      (frequentMeal.items.length > 0
-        ? frequentMeal.items
-        : [
-            {
-              name: frequentMeal.name,
-              weightGrams: frequentMeal.weightGrams,
-              proteinPer100: frequentMeal.protein,
-              carbsPer100: frequentMeal.carbs,
-              fatsPer100: frequentMeal.fats,
-            },
-          ]
-      ).map((item) => ({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: item.name,
-        weightGrams: String(Math.round(item.weightGrams || 0)),
-        proteinPer100: String(Math.round(item.proteinPer100 || 0)),
-        carbsPer100: String(Math.round(item.carbsPer100 || 0)),
-        fatsPer100: String(Math.round(item.fatsPer100 || 0)),
-      })),
-    );
+    const baseWeight = getFrequentBaseWeight(frequentMeal);
+    setFrequentPortionDraft({
+      source: frequentMeal,
+      name: frequentMeal.name,
+      mealType: frequentMeal.mealType,
+      weightGrams: formatPortionValue(baseWeight),
+      calories: formatPortionValue(frequentMeal.calories),
+      protein: formatPortionValue(frequentMeal.protein),
+      carbs: formatPortionValue(frequentMeal.carbs),
+      fats: formatPortionValue(frequentMeal.fats),
+    });
+    setShowFrequentModal(false);
+    cancelFrequentEdit();
+  };
+
+  const updateFrequentPortionWeight = (value: string) => {
+    setFrequentPortionDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const baseWeight = getFrequentBaseWeight(current.source);
+      const nextWeight = parseField(value);
+      if (baseWeight <= 0 || nextWeight < 0) {
+        return { ...current, weightGrams: value };
+      }
+
+      const factor = nextWeight / baseWeight;
+      return {
+        ...current,
+        weightGrams: value,
+        calories: formatPortionValue(current.source.calories * factor),
+        protein: formatPortionValue(current.source.protein * factor),
+        carbs: formatPortionValue(current.source.carbs * factor),
+        fats: formatPortionValue(current.source.fats * factor),
+      };
+    });
+  };
+
+  const confirmFrequentPortion = async () => {
+    if (!frequentPortionDraft) {
+      return;
+    }
+
+    const mealName = frequentPortionDraft.name.trim();
+    const portionWeight = parseField(frequentPortionDraft.weightGrams);
+    const values = {
+      calories: parseField(frequentPortionDraft.calories),
+      protein: parseField(frequentPortionDraft.protein),
+      carbs: parseField(frequentPortionDraft.carbs),
+      fats: parseField(frequentPortionDraft.fats),
+    };
+
+    if (!mealName) {
+      Alert.alert('Falta el nombre', 'Ingresa un nombre para registrar la comida.');
+      return;
+    }
+    if (portionWeight <= 0) {
+      Alert.alert('Cantidad inválida', 'Ingresa una cantidad mayor a 0 gramos.');
+      return;
+    }
+    if (Object.values(values).some((value) => value < 0)) {
+      Alert.alert('Valores inválidos', 'Los macros y calorías no pueden ser negativos.');
+      return;
+    }
+
+    setFrequentPortionDraft(null);
+    await onAddMeal({
+      name: mealName,
+      mealType: frequentPortionDraft.mealType,
+      ...values,
+      createdAt: new Date().toISOString(),
+    });
   };
 
   const startFrequentEdit = (frequentMeal: FrequentMeal) => {
@@ -1607,7 +1669,7 @@ function AddMealTab({
                     <Text style={styles.frequentItemMeta}>
                       {Math.round(frequentMeal.calories)} kcal · P {Math.round(frequentMeal.protein)}
                     </Text>
-                    <Text style={styles.frequentTapHint}>Tocar para cargar</Text>
+                    <Text style={styles.frequentTapHint}>Tocar para ajustar</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => confirmDeleteFrequent(frequentMeal)}
@@ -1620,6 +1682,120 @@ function AddMealTab({
             </ScrollView>
           )}
         </View>
+
+        <Modal
+          visible={frequentPortionDraft !== null}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setFrequentPortionDraft(null)}
+        >
+          <KeyboardAvoidingView
+            style={styles.analysisReviewBackdrop}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.analysisReviewCard}>
+              <ScrollView
+                contentContainerStyle={styles.analysisReviewContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.analysisReviewIcon}>
+                  <Text style={styles.analysisReviewIconText}>⚖</Text>
+                </View>
+                <Text style={styles.analysisReviewTitle}>Ajustar porción</Text>
+                <Text style={styles.analysisReviewSubtitle}>
+                  Cambia los gramos y recalcularemos los macros desde la porción guardada.
+                </Text>
+
+                <FormLabel text="Nombre de la comida" />
+                <TextInput
+                  value={frequentPortionDraft?.name ?? ''}
+                  onChangeText={(nextName) => setFrequentPortionDraft((current) => current ? { ...current, name: nextName } : current)}
+                  style={styles.analysisReviewInput}
+                />
+
+                <FormLabel text="Tipo de comida" />
+                <View style={styles.mealTypeRow}>
+                  {mealTypeOptions.map((option) => (
+                    <Pressable
+                      key={`portion-${option.value}`}
+                      onPress={() => setFrequentPortionDraft((current) => current ? { ...current, mealType: option.value } : current)}
+                      style={[
+                        styles.mealTypePill,
+                        frequentPortionDraft?.mealType === option.value && styles.mealTypePillActive,
+                      ]}
+                    >
+                      <Text style={[
+                        styles.mealTypePillText,
+                        frequentPortionDraft?.mealType === option.value && styles.mealTypePillTextActive,
+                      ]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={styles.portionWeightCard}>
+                  <View>
+                    <Text style={styles.portionWeightLabel}>CANTIDAD A CONSUMIR</Text>
+                    <Text style={styles.portionBaseText}>
+                      Porción guardada: {formatPortionValue(frequentPortionDraft ? getFrequentBaseWeight(frequentPortionDraft.source) : 0)} g
+                    </Text>
+                  </View>
+                  <View style={styles.portionWeightInputRow}>
+                    <TextInput
+                      value={frequentPortionDraft?.weightGrams ?? ''}
+                      onChangeText={updateFrequentPortionWeight}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      style={styles.portionWeightInput}
+                    />
+                    <Text style={styles.portionWeightUnit}>g</Text>
+                  </View>
+                </View>
+
+                {frequentPortionDraft && getFrequentBaseWeight(frequentPortionDraft.source) <= 0 && (
+                  <Text style={styles.portionWarning}>
+                    Esta comida no tiene una porción base. Ingresa los gramos y ajusta los macros manualmente.
+                  </Text>
+                )}
+
+                <View style={styles.analysisReviewGrid}>
+                  {([
+                    ['calories', 'Calorías', 'kcal'],
+                    ['protein', 'Proteínas', 'g'],
+                    ['carbs', 'Carbs', 'g'],
+                    ['fats', 'Grasas', 'g'],
+                  ] as const).map(([field, label, unit]) => (
+                    <View key={`portion-${field}`} style={styles.analysisReviewField}>
+                      <Text style={styles.analysisReviewFieldLabel}>{label}</Text>
+                      <View style={styles.analysisReviewValueRow}>
+                        <TextInput
+                          value={frequentPortionDraft?.[field] ?? ''}
+                          onChangeText={(value) => setFrequentPortionDraft((current) => current ? { ...current, [field]: value } : current)}
+                          keyboardType="decimal-pad"
+                          style={styles.analysisReviewValueInput}
+                        />
+                        <Text style={styles.analysisReviewUnit}>{unit}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <Text style={styles.portionCalculationHint}>
+                  Los resultados se calculan proporcionalmente. Puedes corregir cualquier valor antes de agregar.
+                </Text>
+
+                <Pressable style={styles.analysisReviewConfirm} onPress={confirmFrequentPortion}>
+                  <Text style={styles.analysisReviewConfirmText}>AGREGAR COMIDA</Text>
+                </Pressable>
+                <Pressable style={styles.analysisReviewCancel} onPress={() => setFrequentPortionDraft(null)}>
+                  <Text style={styles.analysisReviewCancelText}>Cancelar</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <Modal
           visible={showFrequentModal}
@@ -3292,6 +3468,68 @@ const styles = StyleSheet.create({
     color: '#6f7b8e',
     fontSize: 13,
     fontWeight: '700',
+  },
+  portionWeightCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#cbdbee',
+    backgroundColor: '#eef5fc',
+    padding: 13,
+    marginTop: 4,
+  },
+  portionWeightLabel: {
+    color: '#29415f',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  portionBaseText: {
+    color: '#728097',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  portionWeightInputRow: {
+    minWidth: 105,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#b9cce2',
+    backgroundColor: '#ffffff',
+    paddingRight: 10,
+  },
+  portionWeightInput: {
+    minWidth: 66,
+    color: '#172033',
+    fontSize: 20,
+    fontWeight: '900',
+    textAlign: 'right',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  portionWeightUnit: {
+    color: '#718097',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  portionWarning: {
+    color: '#9a5a22',
+    fontSize: 12,
+    lineHeight: 17,
+    borderRadius: 10,
+    backgroundColor: '#fff4df',
+    padding: 10,
+  },
+  portionCalculationHint: {
+    color: '#778399',
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 2,
   },
   aiCard: {
     backgroundColor: '#fbfbfc',
