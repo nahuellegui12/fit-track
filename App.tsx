@@ -369,9 +369,9 @@ export default function App() {
       </View>
 
       <View style={styles.bottomNav}>
-        <TabButton label="HOME" icon="home" isActive={activeTab === 'home'} onPress={() => setActiveTab('home')} />
-        <TabButton label="LOG" icon="log" isActive={activeTab === 'add'} onPress={() => setActiveTab('add')} />
-        <TabButton label="PROFILE" icon="profile" isActive={activeTab === 'profile'} onPress={() => setActiveTab('profile')} />
+        <TabButton label="INICIO" icon="home" isActive={activeTab === 'home'} onPress={() => setActiveTab('home')} />
+        <TabButton label="REGISTRAR" icon="log" isActive={activeTab === 'add'} onPress={() => setActiveTab('add')} />
+        <TabButton label="PERFIL" icon="profile" isActive={activeTab === 'profile'} onPress={() => setActiveTab('profile')} />
       </View>
     </SafeAreaView>
   );
@@ -646,7 +646,7 @@ function OnboardingScreen({ onComplete }: { onComplete: (profile: Profile) => vo
           onPress={() => setForm((prev) => ({ ...prev, advancedCut: !prev.advancedCut }))}
         >
           <Text style={[styles.booleanToggleText, form.advancedCut && styles.booleanToggleTextActive]}>
-            Cut avanzado (proteina mas alta en deficit)
+            Déficit avanzado (proteína más alta)
           </Text>
         </Pressable>
 
@@ -727,7 +727,7 @@ function HomeTab({
   return (
     <ScrollView contentContainerStyle={styles.homeContentContainer} showsVerticalScrollIndicator={false}>
       <View style={styles.summaryBlock}>
-        <Text style={styles.summaryLabel}>TODAY'S SUMMARY</Text>
+        <Text style={styles.summaryLabel}>RESUMEN DE HOY</Text>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryValue}>{Math.round(dailyTotals.calories).toLocaleString()}</Text>
           <Text style={styles.summaryTarget}> / {Math.round(dailyTargets.calories).toLocaleString()} kcal</Text>
@@ -735,13 +735,13 @@ function HomeTab({
 
         <View style={styles.macroStatsRow}>
           <MacroStat
-            label="PROTEIN"
+            label="PROTEÍNAS"
             value={dailyTotals.protein}
             target={dailyTargets.protein}
             color="#2f8a7f"
           />
-          <MacroStat label="CARBS" value={dailyTotals.carbs} target={dailyTargets.carbs} color="#ef7054" />
-          <MacroStat label="FATS" value={dailyTotals.fats} target={dailyTargets.fats} color="#b3bfd3" />
+          <MacroStat label="CARBOHIDRATOS" value={dailyTotals.carbs} target={dailyTargets.carbs} color="#ef7054" />
+          <MacroStat label="GRASAS" value={dailyTotals.fats} target={dailyTargets.fats} color="#b3bfd3" />
         </View>
       </View>
 
@@ -753,8 +753,8 @@ function HomeTab({
           style={styles.heroImage}
         />
         <View style={styles.heroOverlay}>
-          <Text style={styles.heroBadge}>NEW FEATURE</Text>
-          <Text style={styles.heroTitle}>Log Meal with Voice</Text>
+          <Text style={styles.heroBadge}>NUEVA FUNCIÓN</Text>
+          <Text style={styles.heroTitle}>Registra con tu voz</Text>
           <Text style={styles.heroDescription}>Dicta tu comida con pesos y la app calcula macros.</Text>
           <Pressable style={styles.heroButton} onPress={onLaunchCamera}>
             <Text style={styles.heroButtonIcon}>🎙️</Text>
@@ -764,7 +764,7 @@ function HomeTab({
       </LinearGradient>
 
       <View style={styles.waterCard}>
-        <Text style={styles.waterTitle}>Weekly Weight</Text>
+        <Text style={styles.waterTitle}>Peso semanal</Text>
         <Text style={styles.waterSubtitle}>Registra tu peso semanal para recalibrar macros.</Text>
         <View style={styles.waterRow}>
           <View style={styles.waterCircle}>
@@ -807,8 +807,8 @@ function HomeTab({
       </View>
 
       <View style={styles.logHeader}>
-        <Text style={styles.logTitle}>Today's Log</Text>
-        <Text style={styles.logHistory}>View History</Text>
+        <Text style={styles.logTitle}>Registro de hoy</Text>
+        <Text style={styles.logHistory}>Ver historial</Text>
       </View>
 
       {todayMeals.length === 0 ? (
@@ -1327,14 +1327,14 @@ function AddMealTab({
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.logMealTitle}>Log Meal</Text>
-        <Text style={styles.logMealSubtitle}>Track your nutrition with precision.</Text>
+        <Text style={styles.logMealTitle}>Registrar comida</Text>
+        <Text style={styles.logMealSubtitle}>Lleva tu nutrición con precisión.</Text>
 
         <View style={styles.aiCard}>
           <View style={styles.aiIconBubble}>
             <Text style={styles.aiIcon}>✦</Text>
           </View>
-          <Text style={styles.aiCardTitle}>AI Meal Analysis</Text>
+          <Text style={styles.aiCardTitle}>Análisis de comida con IA</Text>
           <Text style={styles.aiCardDescription}>
             Toca para dictar tu comida y la IA calcula calorias y macros automaticamente.
           </Text>
@@ -2055,7 +2055,7 @@ function ProfileTab({
         onPress={() => setForm((prev) => ({ ...prev, advancedCut: !prev.advancedCut }))}
       >
         <Text style={[styles.booleanToggleText, form.advancedCut && styles.booleanToggleTextActive]}>
-          Cut avanzado (proteina mas alta en deficit)
+          Déficit avanzado (proteína más alta)
         </Text>
       </Pressable>
 
@@ -2110,7 +2110,7 @@ function ProfileTab({
         onPress={() => setForm((prev) => ({ ...prev, advancedCut: !prev.advancedCut }))}
       >
         <Text style={[styles.booleanToggleText, form.advancedCut && styles.booleanToggleTextActive]}>
-          Cut avanzado (proteina mas alta en deficit)
+          Déficit avanzado (proteína más alta)
         </Text>
       </Pressable>
 
