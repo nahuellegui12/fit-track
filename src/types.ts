@@ -45,6 +45,7 @@ export type WeeklyWeighIn = {
 export type MealEntry = MacroBreakdown & {
   id: string;
   name: string;
+  description?: string;
   mealType: MealType;
   createdAt: string;
 };

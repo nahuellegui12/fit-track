@@ -873,6 +873,14 @@ function AddMealTab({
   ]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysesLeft, setAnalysesLeft] = useState(freeTierLimitPerDay);
+  const [voiceReview, setVoiceReview] = useState<{
+    description: string;
+    name: string;
+    calories: string;
+    protein: string;
+    carbs: string;
+    fats: string;
+  } | null>(null);
   const [spectrumLevels, setSpectrumLevels] = useState([0.2, 0.35, 0.25, 0.4, 0.3]);
   const [showFrequentPrompt, setShowFrequentPrompt] = useState(false);
   const [frequentDraftName, setFrequentDraftName] = useState('');
@@ -1256,30 +1264,16 @@ function AddMealTab({
 
       setIsAnalyzing(true);
       const analysis = await analyzeMealAudio(audio.base64, audio.mimeType);
-      setName(analysis.name);
-      setFrequentDraftName(analysis.name);
-      setProtein(String(Math.round(analysis.protein)));
-      setCarbs(String(Math.round(analysis.carbs)));
-      setFats(String(Math.round(analysis.fats)));
-      setCalories(String(Math.round(analysis.calories)));
-      if (analysis.items.length > 0) {
-        const totalWeight = analysis.items.reduce((acc, item) => acc + item.weightGrams, 0);
-        setWeightGrams(String(Math.round(totalWeight)));
-        setMealItems(
-          analysis.items.map((item) => ({
-            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            name: item.name,
-            weightGrams: String(Math.round(item.weightGrams || 100)),
-            proteinPer100: String(Math.round(item.proteinPer100)),
-            carbsPer100: String(Math.round(item.carbsPer100)),
-            fatsPer100: String(Math.round(item.fatsPer100)),
-          })),
-        );
-      }
-
-      setShowFrequentPrompt(true);
-
-      setAnalysesLeft(await getVoiceAnalysesLeft());
+      setVoiceReview({
+        description: analysis.description || analysis.name,
+        name: analysis.name,
+        protein: String(Math.round(analysis.protein)),
+        carbs: String(Math.round(analysis.carbs)),
+        fats: String(Math.round(analysis.fats)),
+        calories: String(Math.round(analysis.calories)),
+      });
+      setAnalysesLeft((current) => Math.max(0, current - 1));
+      getVoiceAnalysesLeft().then(setAnalysesLeft).catch(() => undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No pudimos analizar el audio.';
       Alert.alert('Analisis no disponible', message);
@@ -1314,6 +1308,39 @@ function AddMealTab({
     }
 
     await startRecording();
+  };
+
+  const confirmVoiceReview = async () => {
+    if (!voiceReview) {
+      return;
+    }
+
+    const mealName = voiceReview.name.trim();
+    if (!mealName) {
+      Alert.alert('Falta el nombre', 'Ingresa un nombre para registrar la comida.');
+      return;
+    }
+
+    const values = {
+      protein: parseField(voiceReview.protein),
+      carbs: parseField(voiceReview.carbs),
+      fats: parseField(voiceReview.fats),
+      calories: parseField(voiceReview.calories),
+    };
+
+    if (Object.values(values).some((value) => value < 0)) {
+      Alert.alert('Valores inválidos', 'Los macros y calorías no pueden ser negativos.');
+      return;
+    }
+
+    setVoiceReview(null);
+    await onAddMeal({
+      name: mealName,
+      description: voiceReview.description.trim() || undefined,
+      mealType,
+      ...values,
+      createdAt: new Date().toISOString(),
+    });
   };
 
   return (
@@ -1447,6 +1474,93 @@ function AddMealTab({
             </View>
           )}
         </View>
+
+        <Modal
+          visible={voiceReview !== null}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setVoiceReview(null)}
+        >
+          <KeyboardAvoidingView
+            style={styles.analysisReviewBackdrop}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.analysisReviewCard}>
+              <ScrollView
+                contentContainerStyle={styles.analysisReviewContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.analysisReviewIcon}>
+                  <Text style={styles.analysisReviewIconText}>✦</Text>
+                </View>
+                <Text style={styles.analysisReviewTitle}>Revisa el análisis</Text>
+                <Text style={styles.analysisReviewSubtitle}>
+                  Esto es lo que entendimos. Puedes ajustar cualquier dato antes de guardar.
+                </Text>
+
+                <FormLabel text="Lo que entendimos" />
+                <TextInput
+                  value={voiceReview?.description ?? ''}
+                  onChangeText={(description) => setVoiceReview((current) => current ? { ...current, description } : current)}
+                  multiline
+                  style={[styles.analysisReviewInput, styles.analysisReviewDescription]}
+                />
+
+                <FormLabel text="Nombre de la comida" />
+                <TextInput
+                  value={voiceReview?.name ?? ''}
+                  onChangeText={(nextName) => setVoiceReview((current) => current ? { ...current, name: nextName } : current)}
+                  style={styles.analysisReviewInput}
+                />
+
+                <FormLabel text="Tipo de comida" />
+                <View style={styles.mealTypeRow}>
+                  {mealTypeOptions.map((option) => (
+                    <Pressable
+                      key={`review-${option.value}`}
+                      onPress={() => setMealType(option.value)}
+                      style={[styles.mealTypePill, mealType === option.value && styles.mealTypePillActive]}
+                    >
+                      <Text style={[styles.mealTypePillText, mealType === option.value && styles.mealTypePillTextActive]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <View style={styles.analysisReviewGrid}>
+                  {([
+                    ['calories', 'Calorías', 'kcal'],
+                    ['protein', 'Proteínas', 'g'],
+                    ['carbs', 'Carbs', 'g'],
+                    ['fats', 'Grasas', 'g'],
+                  ] as const).map(([field, label, unit]) => (
+                    <View key={field} style={styles.analysisReviewField}>
+                      <Text style={styles.analysisReviewFieldLabel}>{label}</Text>
+                      <View style={styles.analysisReviewValueRow}>
+                        <TextInput
+                          value={voiceReview?.[field] ?? ''}
+                          onChangeText={(value) => setVoiceReview((current) => current ? { ...current, [field]: value } : current)}
+                          keyboardType="decimal-pad"
+                          style={styles.analysisReviewValueInput}
+                        />
+                        <Text style={styles.analysisReviewUnit}>{unit}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <Pressable style={styles.analysisReviewConfirm} onPress={confirmVoiceReview}>
+                  <Text style={styles.analysisReviewConfirmText}>AGREGAR COMIDA</Text>
+                </Pressable>
+                <Pressable style={styles.analysisReviewCancel} onPress={() => setVoiceReview(null)}>
+                  <Text style={styles.analysisReviewCancelText}>Cancelar y no guardar</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <View style={styles.frequentSectionCard}>
           <View style={styles.frequentSectionHeader}>
@@ -3057,6 +3171,127 @@ const styles = StyleSheet.create({
     color: '#4d6280',
     fontWeight: '700',
     fontSize: 12,
+  },
+  analysisReviewBackdrop: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.62)',
+    padding: 18,
+  },
+  analysisReviewCard: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '92%',
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    overflow: 'hidden',
+  },
+  analysisReviewContent: {
+    padding: 20,
+    gap: 9,
+  },
+  analysisReviewIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#dceafb',
+  },
+  analysisReviewIconText: {
+    color: '#24456f',
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  analysisReviewTitle: {
+    color: '#111827',
+    fontSize: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  analysisReviewSubtitle: {
+    color: '#6b7588',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  analysisReviewInput: {
+    borderWidth: 1,
+    borderColor: '#d7e1ee',
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+    color: '#172033',
+    fontSize: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  analysisReviewDescription: {
+    minHeight: 68,
+    textAlignVertical: 'top',
+  },
+  analysisReviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 5,
+  },
+  analysisReviewField: {
+    minWidth: 135,
+    flexBasis: '46%',
+    flexGrow: 1,
+    gap: 5,
+  },
+  analysisReviewFieldLabel: {
+    color: '#59677a',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  analysisReviewValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d7e1ee',
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+    paddingRight: 10,
+  },
+  analysisReviewValueInput: {
+    flex: 1,
+    color: '#172033',
+    fontSize: 17,
+    fontWeight: '700',
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+  },
+  analysisReviewUnit: {
+    color: '#8a95a7',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  analysisReviewConfirm: {
+    borderRadius: 13,
+    alignItems: 'center',
+    backgroundColor: '#1d4f64',
+    paddingVertical: 14,
+    marginTop: 9,
+  },
+  analysisReviewConfirmText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  analysisReviewCancel: {
+    alignItems: 'center',
+    paddingVertical: 9,
+  },
+  analysisReviewCancelText: {
+    color: '#6f7b8e',
+    fontSize: 13,
+    fontWeight: '700',
   },
   aiCard: {
     backgroundColor: '#fbfbfc',

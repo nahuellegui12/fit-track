@@ -17,6 +17,7 @@ type AnalysisItem = {
 };
 
 type Analysis = {
+  description: string;
   name: string;
   protein: number;
   carbs: number;
@@ -91,6 +92,10 @@ function parseAnalysis(rawText: string): Analysis {
   }
 
   return {
+    description:
+      typeof parsed.description === 'string' && parsed.description.trim()
+        ? parsed.description.trim()
+        : parsed.name,
     name: parsed.name,
     protein: Math.max(0, parsed.protein),
     carbs: Math.max(0, parsed.carbs),
@@ -177,7 +182,8 @@ Deno.serve(async (request) => {
     'Si recibes audio, primero transcribelo a texto.',
     'Convierte la descripcion final en una estimacion de macros.',
     'Responde solo JSON valido sin markdown con esta estructura exacta:',
-    '{"name":"string","protein":0,"carbs":0,"fats":0,"calories":0,"items":[{"name":"string","weightGrams":0,"proteinPer100":0,"carbsPer100":0,"fatsPer100":0}]}',
+    '{"description":"string","name":"string","protein":0,"carbs":0,"fats":0,"calories":0,"items":[{"name":"string","weightGrams":0,"proteinPer100":0,"carbsPer100":0,"fatsPer100":0}]}',
+    'description debe contener la transcripcion o descripcion completa de lo que entendiste del usuario.',
     'Usa todos los alimentos mencionados. Si falta algun peso, estimarlo razonablemente.',
     'calories debe coincidir aproximadamente con protein*4 + carbs*4 + fats*9.',
   ];

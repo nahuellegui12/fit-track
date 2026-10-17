@@ -7,6 +7,7 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 const responseSchema = z.object({
+  description: z.string().default(''),
   name: z.string(),
   protein: z.number().nonnegative(),
   carbs: z.number().nonnegative(),
