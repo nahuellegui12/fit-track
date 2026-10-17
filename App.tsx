@@ -740,7 +740,7 @@ function HomeTab({
             target={dailyTargets.protein}
             color="#2f8a7f"
           />
-          <MacroStat label="CARBOHIDRATOS" value={dailyTotals.carbs} target={dailyTargets.carbs} color="#ef7054" />
+          <MacroStat label="CARBS" value={dailyTotals.carbs} target={dailyTargets.carbs} color="#ef7054" />
           <MacroStat label="GRASAS" value={dailyTotals.fats} target={dailyTargets.fats} color="#b3bfd3" />
         </View>
       </View>
@@ -2805,7 +2805,7 @@ const styles = StyleSheet.create({
   },
   logMealTitle: {
     color: '#111827',
-    fontSize: 44,
+    fontSize: 40,
     fontWeight: '800',
     marginTop: 8,
   },
