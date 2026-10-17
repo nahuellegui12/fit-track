@@ -317,9 +317,11 @@ export default function App() {
           <View style={styles.avatarCircle}>
             <Text style={styles.avatarEmoji}>🧑‍💼</Text>
           </View>
-          <View>
+          <View style={styles.brandTextWrap}>
             <Text style={styles.brandTitle}>FitTrack</Text>
-            <Text style={styles.brandSubtitle}>@{account.username} · {formatGoalLabel(profile.goal)}</Text>
+            <Text style={styles.brandSubtitle} numberOfLines={1} ellipsizeMode="tail">
+              @{account.username} · {formatGoalLabel(profile.goal)}
+            </Text>
           </View>
         </View>
         <View style={styles.kcalPill}>
@@ -2786,6 +2788,8 @@ function mealEmoji(mealType: MealEntry['mealType']): string {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
+    overflow: 'hidden',
     backgroundColor: COLORS.bg,
   },
   authContainer: {
@@ -4076,17 +4080,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   appHeader: {
+    width: '100%',
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 6,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
   },
   brandRow: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  brandTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   avatarCircle: {
     width: 38,
@@ -4095,6 +4107,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e6ebf3',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   avatarEmoji: {
     fontSize: 18,
@@ -4108,12 +4121,14 @@ const styles = StyleSheet.create({
   brandSubtitle: {
     color: COLORS.textMuted,
     fontSize: 10,
+    flexShrink: 1,
   },
   kcalPill: {
     backgroundColor: '#dbe3ef',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
+    flexShrink: 0,
   },
   kcalPillText: {
     color: '#243245',
