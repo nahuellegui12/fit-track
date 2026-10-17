@@ -44,8 +44,26 @@ import {
   freeTierLimitPerDay,
   getVoiceAnalysesLeft,
 } from './src/mealVoiceAnalysis';
-import { loadAppState, saveAppState } from './src/storage';
-import { syncMealIfSupabaseConfigured } from './src/supabase';
+import {
+  EMPTY_STATE,
+  getLastUsername,
+  loadLegacyAppStateForMigration,
+  loadUserAppState,
+  markLegacyAppStateMigrated,
+  saveLastUsername,
+  saveUserAppState,
+} from './src/storage';
+import { isSupabaseConfigured } from './src/supabase';
+import {
+  getCurrentAccount,
+  loginWithUsername,
+  logout,
+  normalizeUsername,
+  registerWithUsername,
+  subscribeToAccount,
+  type Account,
+} from './src/auth';
+import { loadCloudAppState, saveCloudAppState } from './src/cloudState';
 import {
   createMealAudioRecorder,
   type MealAudioRecorder,
@@ -53,6 +71,9 @@ import {
 } from './src/mealAudioRecorder';
 
 export default function App() {
+  const [account, setAccount] = useState<Account | null>(null);
+  const accountIdRef = useRef<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('home');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [meals, setMeals] = useState<MealEntry[]>([]);
@@ -62,29 +83,117 @@ export default function App() {
   const [isHydrating, setIsHydrating] = useState(true);
 
   useEffect(() => {
-    const hydrate = async () => {
-      const appState = await loadAppState();
-      setProfile(appState.profile ? normalizeProfile(appState.profile) : null);
-      setMeals(appState.meals);
-      setWeighIns(appState.weighIns ?? []);
-      setFrequentMeals(appState.frequentMeals ?? []);
+    if (!isSupabaseConfigured) {
+      setIsAuthLoading(false);
       setIsHydrating(false);
-    };
-
-    hydrate().catch(() => {
-      setIsHydrating(false);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (isHydrating) {
       return;
     }
 
-    saveAppState({ profile, meals, weighIns, frequentMeals }).catch(() => {
+    const handleAccountChange = (nextAccount: Account | null) => {
+      const nextAccountId = nextAccount?.id ?? null;
+      if (accountIdRef.current === nextAccountId) {
+        return;
+      }
+
+      accountIdRef.current = nextAccountId;
+      if (nextAccount) {
+        setIsHydrating(true);
+      }
+      setAccount(nextAccount);
+    };
+
+    const subscription = subscribeToAccount(handleAccountChange);
+    getCurrentAccount()
+      .then(handleAccountChange)
+      .catch(() => handleAccountChange(null))
+      .finally(() => setIsAuthLoading(false));
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!account) {
+      setProfile(null);
+      setMeals([]);
+      setWeighIns([]);
+      setFrequentMeals([]);
+      setIsHydrating(false);
       return;
-    });
-  }, [profile, meals, weighIns, frequentMeals, isHydrating]);
+    }
+
+    let cancelled = false;
+    setIsHydrating(true);
+
+    const hydrate = async () => {
+      let cloudState = null;
+      try {
+        cloudState = await loadCloudAppState(account.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'No pudimos descargar tus datos.';
+        Alert.alert('Sincronizacion no disponible', `${message}\n\nSe usaran los datos guardados en este dispositivo.`);
+      }
+
+      const localState = await loadUserAppState(account.id);
+      let appState = cloudState ?? localState;
+      let migratedLegacyState = false;
+
+      if (!appState) {
+        const legacyState = await loadLegacyAppStateForMigration();
+        if (legacyState) {
+          appState = legacyState;
+          migratedLegacyState = true;
+        }
+      }
+
+      appState ??= EMPTY_STATE;
+      if (cancelled) {
+        return;
+      }
+
+      setProfile(appState.profile ? normalizeProfile(appState.profile) : null);
+      setMeals(appState.meals ?? []);
+      setWeighIns(appState.weighIns ?? []);
+      setFrequentMeals(appState.frequentMeals ?? []);
+      await saveUserAppState(account.id, appState);
+
+      if (!cloudState) {
+        await saveCloudAppState(account.id, appState);
+      }
+      if (migratedLegacyState) {
+        await markLegacyAppStateMigrated();
+      }
+    };
+
+    hydrate()
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'No pudimos preparar tu cuenta.';
+        Alert.alert('Error al cargar la cuenta', message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsHydrating(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account]);
+
+  useEffect(() => {
+    if (!account || isHydrating) {
+      return;
+    }
+
+    const appState = { profile, meals, weighIns, frequentMeals };
+    saveUserAppState(account.id, appState).catch(() => undefined);
+
+    const timer = setTimeout(() => {
+      saveCloudAppState(account.id, appState).catch(() => undefined);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [account, profile, meals, weighIns, frequentMeals, isHydrating]);
 
   useEffect(() => {
     if (!profile) {
@@ -127,13 +236,17 @@ export default function App() {
     );
   }, [profile, weighIns, meals, lastHandledSuggestionKey]);
 
-  if (isHydrating) {
+  if (isAuthLoading || (account && isHydrating)) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.accent} />
         <Text style={styles.loadingText}>Cargando FitTrack...</Text>
       </SafeAreaView>
     );
+  }
+
+  if (!account) {
+    return <AuthScreen />;
   }
 
   if (!profile) {
@@ -150,7 +263,6 @@ export default function App() {
     };
 
     setMeals((prev) => [completeMeal, ...prev]);
-    await syncMealIfSupabaseConfigured(completeMeal);
     setActiveTab('home');
   };
 
@@ -207,7 +319,7 @@ export default function App() {
           </View>
           <View>
             <Text style={styles.brandTitle}>FitTrack</Text>
-            <Text style={styles.brandSubtitle}>{formatGoalLabel(profile.goal)}</Text>
+            <Text style={styles.brandSubtitle}>@{account.username} · {formatGoalLabel(profile.goal)}</Text>
           </View>
         </View>
         <View style={styles.kcalPill}>
@@ -242,6 +354,16 @@ export default function App() {
             onAddWeighIn={addWeeklyWeighIn}
             onUpdateWeighIn={updateWeeklyWeighIn}
             onDeleteWeighIn={deleteWeeklyWeighIn}
+            username={account.username}
+            onLogout={async () => {
+              try {
+                await logout();
+                setActiveTab('home');
+              } catch (error) {
+                const message = error instanceof Error ? error.message : 'No pudimos cerrar la sesion.';
+                Alert.alert('Error', message);
+              }
+            }}
           />
         )}
       </View>
@@ -251,6 +373,146 @@ export default function App() {
         <TabButton label="LOG" icon="log" isActive={activeTab === 'add'} onPress={() => setActiveTab('add')} />
         <TabButton label="PROFILE" icon="profile" isActive={activeTab === 'profile'} onPress={() => setActiveTab('profile')} />
       </View>
+    </SafeAreaView>
+  );
+}
+
+function AuthScreen() {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    getLastUsername().then(setUsername).catch(() => undefined);
+  }, []);
+
+  const submit = async () => {
+    if (mode === 'register' && password !== confirmPassword) {
+      Alert.alert('Las contraseñas no coinciden', 'Revisa ambos campos e intenta nuevamente.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const account = mode === 'register'
+        ? await registerWithUsername(username, password)
+        : await loginWithUsername(username, password);
+      await saveLastUsername(account.username);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No pudimos ingresar a tu cuenta.';
+      Alert.alert(mode === 'register' ? 'No pudimos crear la cuenta' : 'No pudimos ingresar', message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.authContainer}>
+      <StatusBar style="dark" />
+      <KeyboardAvoidingView
+        style={styles.authKeyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.authScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.authBrandMark}>
+            <Text style={styles.authBrandLetter}>F</Text>
+          </View>
+          <Text style={styles.authTitle}>FitTrack</Text>
+          <Text style={styles.authSubtitle}>
+            {mode === 'login'
+              ? 'Ingresa para continuar con tu seguimiento.'
+              : 'Crea tu cuenta personal en menos de un minuto.'}
+          </Text>
+
+          <View style={styles.authCard}>
+            <View style={styles.authModeRow}>
+              <Pressable
+                style={[styles.authModeButton, mode === 'login' && styles.authModeButtonActive]}
+                onPress={() => setMode('login')}
+              >
+                <Text style={[styles.authModeText, mode === 'login' && styles.authModeTextActive]}>Ingresar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.authModeButton, mode === 'register' && styles.authModeButtonActive]}
+                onPress={() => setMode('register')}
+              >
+                <Text style={[styles.authModeText, mode === 'register' && styles.authModeTextActive]}>Crear cuenta</Text>
+              </Pressable>
+            </View>
+
+            {!isSupabaseConfigured && (
+              <View style={styles.authErrorCard}>
+                <Text style={styles.authErrorText}>Falta configurar Supabase en las variables de entorno.</Text>
+              </View>
+            )}
+
+            <FormLabel text="Nombre de usuario" />
+            <TextInput
+              value={username}
+              onChangeText={(value) => setUsername(normalizeUsername(value))}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={20}
+              placeholder="Ej: nahuel"
+              placeholderTextColor={COLORS.textMuted}
+              style={styles.authInput}
+            />
+            <Text style={styles.authHelper}>3 a 20 caracteres: letras, numeros, guion o guion bajo.</Text>
+
+            <FormLabel text="Contraseña" />
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+              maxLength={72}
+              placeholder="Minimo 8 caracteres"
+              placeholderTextColor={COLORS.textMuted}
+              style={styles.authInput}
+            />
+            <Text style={styles.authHelper}>Debe incluir al menos una letra y un numero.</Text>
+
+            {mode === 'register' && (
+              <>
+                <FormLabel text="Repetir contraseña" />
+                <TextInput
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  maxLength={72}
+                  placeholder="Repeti la contraseña"
+                  placeholderTextColor={COLORS.textMuted}
+                  style={styles.authInput}
+                />
+              </>
+            )}
+
+            <Pressable
+              style={[styles.authSubmitButton, (isSubmitting || !isSupabaseConfigured) && styles.buttonDisabled]}
+              onPress={submit}
+              disabled={isSubmitting || !isSupabaseConfigured}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.authSubmitText}>{mode === 'login' ? 'Ingresar' : 'Crear mi cuenta'}</Text>
+              )}
+            </Pressable>
+
+            <Text style={styles.authPrivacyNote}>
+              Tu nombre quedara recordado en este dispositivo. La contraseña nunca se guarda localmente.
+            </Text>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1660,6 +1922,8 @@ function ProfileTab({
   onAddWeighIn,
   onUpdateWeighIn,
   onDeleteWeighIn,
+  username,
+  onLogout,
 }: {
   profile: Profile;
   weighIns: WeeklyWeighIn[];
@@ -1667,6 +1931,8 @@ function ProfileTab({
   onAddWeighIn: (weightKg: number, isAtypicalWeek?: boolean, atypicalReason?: string) => void;
   onUpdateWeighIn: (id: string, weightKg: number) => void;
   onDeleteWeighIn: (id: string) => void;
+  username: string;
+  onLogout: () => Promise<void>;
 }) {
   const [form, setForm] = useState(profile);
   const [weeklyWeight, setWeeklyWeight] = useState('');
@@ -1698,6 +1964,17 @@ function ProfileTab({
         keyboardDismissMode="on-drag"
       >
         <Text style={styles.sectionTitle}>Perfil y objetivo</Text>
+
+        <View style={styles.accountCard}>
+          <View style={styles.accountInfo}>
+            <Text style={styles.accountLabel}>CUENTA ACTIVA</Text>
+            <Text style={styles.accountUsername}>@{username}</Text>
+            <Text style={styles.accountHint}>Tus datos se sincronizan con esta cuenta.</Text>
+          </View>
+          <Pressable style={styles.logoutButton} onPress={onLogout}>
+            <Text style={styles.logoutButtonText}>Cerrar sesion</Text>
+          </Pressable>
+        </View>
 
       <FormLabel text="Nombre" />
       <TextInput value={form.name} onChangeText={(name) => setForm((prev) => ({ ...prev, name }))} style={styles.input} />
@@ -2221,6 +2498,127 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bg,
   },
+  authContainer: {
+    flex: 1,
+    backgroundColor: '#eef3f8',
+  },
+  authKeyboardContainer: {
+    flex: 1,
+  },
+  authScrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 36,
+  },
+  authBrandMark: {
+    width: 68,
+    height: 68,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1d4f64',
+    marginBottom: 14,
+  },
+  authBrandLetter: {
+    color: '#ffffff',
+    fontSize: 34,
+    fontWeight: '900',
+  },
+  authTitle: {
+    color: '#111827',
+    fontSize: 34,
+    fontWeight: '900',
+  },
+  authSubtitle: {
+    color: '#6b7588',
+    fontSize: 15,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 22,
+  },
+  authCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#dce5ef',
+    backgroundColor: '#ffffff',
+    padding: 20,
+    gap: 8,
+  },
+  authModeRow: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    backgroundColor: '#edf2f7',
+    marginBottom: 10,
+  },
+  authModeButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 11,
+    paddingVertical: 10,
+  },
+  authModeButtonActive: {
+    backgroundColor: '#ffffff',
+  },
+  authModeText: {
+    color: '#7b8798',
+    fontWeight: '700',
+  },
+  authModeTextActive: {
+    color: '#1d334d',
+  },
+  authInput: {
+    borderWidth: 1,
+    borderColor: '#d7e0eb',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#111827',
+    backgroundColor: '#f9fbfd',
+    fontSize: 16,
+  },
+  authHelper: {
+    color: '#8994a5',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  authSubmitButton: {
+    minHeight: 48,
+    marginTop: 12,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1d4f64',
+  },
+  authSubmitText: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  authPrivacyNote: {
+    color: '#8994a5',
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  authErrorCard: {
+    borderRadius: 10,
+    backgroundColor: '#fdecec',
+    padding: 10,
+  },
+  authErrorText: {
+    color: '#9b3030',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
   keyboardContainer: {
     flex: 1,
   },
@@ -2291,6 +2689,50 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: COLORS.text,
     fontSize: 19,
+    fontWeight: '700',
+  },
+  accountCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#d8e3ef',
+    backgroundColor: '#ffffff',
+    padding: 14,
+    marginBottom: 8,
+  },
+  accountInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  accountLabel: {
+    color: '#8793a5',
+    fontSize: 10,
+    letterSpacing: 1,
+    fontWeight: '800',
+  },
+  accountUsername: {
+    color: '#1d334d',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  accountHint: {
+    color: '#7b8798',
+    fontSize: 11,
+  },
+  logoutButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ebcaca',
+    backgroundColor: '#fff3f3',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  logoutButtonText: {
+    color: '#9a3d3d',
+    fontSize: 12,
     fontWeight: '700',
   },
   macroCard: {

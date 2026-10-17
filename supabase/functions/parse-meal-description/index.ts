@@ -122,20 +122,26 @@ Deno.serve(async (request) => {
     return jsonResponse(500, { error: 'Falta GEMINI_API_KEY en secretos de Supabase.' });
   }
 
-  const deviceId = request.headers.get('x-device-id');
-  if (!deviceId) {
-    return jsonResponse(400, { error: 'Falta x-device-id.' });
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const accessToken = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  if (!accessToken) {
+    return jsonResponse(401, { error: 'Debes iniciar sesion.' });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
+  const userId = authData.user?.id;
+  if (authError || !userId) {
+    return jsonResponse(401, { error: 'La sesion no es valida.' });
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const usageOnly = new URL(request.url).searchParams.get('usageOnly') === '1';
 
   const { data: usageRow, error: usageError } = await supabase
-    .from('daily_ai_usage')
+    .from('daily_user_ai_usage')
     .select('request_count')
     .eq('usage_date', today)
-    .eq('device_id', deviceId)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (usageError) {
@@ -225,7 +231,7 @@ Deno.serve(async (request) => {
     }
 
     await supabase.from('photo_analyses').insert({
-      device_id: deviceId,
+      user_id: userId,
       status: 'error',
       error_message: message,
     });
@@ -242,14 +248,14 @@ Deno.serve(async (request) => {
   }
 
   const nextCount = usedToday + 1;
-  const { error: upsertError } = await supabase.from('daily_ai_usage').upsert(
+  const { error: upsertError } = await supabase.from('daily_user_ai_usage').upsert(
     {
       usage_date: today,
-      device_id: deviceId,
+      user_id: userId,
       request_count: nextCount,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'usage_date,device_id' },
+    { onConflict: 'usage_date,user_id' },
   );
 
   if (upsertError) {
@@ -257,7 +263,7 @@ Deno.serve(async (request) => {
   }
 
   await supabase.from('photo_analyses').insert({
-    device_id: deviceId,
+    user_id: userId,
     meal_name: analysis.name,
     protein: analysis.protein,
     carbs: analysis.carbs,

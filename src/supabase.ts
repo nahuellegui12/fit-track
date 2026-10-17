@@ -1,32 +1,36 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
-import { type MealEntry } from './types';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-const supabase = isSupabaseConfigured
+export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
       auth: {
-        persistSession: false,
+        storage: AsyncStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
       },
     })
   : null;
 
-export async function syncMealIfSupabaseConfigured(meal: MealEntry): Promise<void> {
+export function requireSupabase() {
   if (!supabase) {
-    return;
+    throw new Error('Supabase no esta configurado.');
   }
 
-  await supabase.from('meals').insert({
-    id: meal.id,
-    name: meal.name,
-    meal_type: meal.mealType,
-    protein: meal.protein,
-    carbs: meal.carbs,
-    fats: meal.fats,
-    calories: meal.calories,
-    created_at: meal.createdAt,
-  });
+  return supabase;
+}
+
+export async function getAccessToken(): Promise<string> {
+  const client = requireSupabase();
+  const { data, error } = await client.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw new Error('Tu sesion vencio. Volve a ingresar.');
+  }
+
+  return data.session.access_token;
 }

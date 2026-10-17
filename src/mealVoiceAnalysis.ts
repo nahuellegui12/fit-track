@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getOrCreateDeviceId } from './storage';
+import { getAccessToken } from './supabase';
 
 export const freeTierLimitPerDay = 8;
 
@@ -36,20 +36,27 @@ const usageSchema = z.object({
 
 export type MealVoiceAnalysis = z.infer<typeof responseSchema>;
 
+async function getRequestHeaders(): Promise<Record<string, string>> {
+  if (!supabaseAnonKey) {
+    throw new Error('Supabase no configurado.');
+  }
+
+  const accessToken = await getAccessToken();
+  return {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 export async function getVoiceAnalysesLeft(): Promise<number> {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Configura EXPO_PUBLIC_SUPABASE_URL y EXPO_PUBLIC_SUPABASE_ANON_KEY.');
   }
 
-  const deviceId = await getOrCreateDeviceId();
   const response = await fetch(`${supabaseUrl}/functions/v1/parse-meal-description?usageOnly=1`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-      'x-device-id': deviceId,
-    },
+    headers: await getRequestHeaders(),
   });
 
   const raw = await response.json().catch(() => null);
@@ -76,15 +83,9 @@ export async function analyzeMealDescription(description: string): Promise<MealV
     throw new Error('Escribe o dicta lo que comiste para analizarlo.');
   }
 
-  const deviceId = await getOrCreateDeviceId();
   const response = await fetch(`${supabaseUrl}/functions/v1/parse-meal-description`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-      'x-device-id': deviceId,
-    },
+    headers: await getRequestHeaders(),
     body: JSON.stringify({
       description: cleanDescription,
     }),
@@ -113,15 +114,9 @@ export async function analyzeMealAudio(audioBase64: string, mimeType: string): P
     throw new Error('No se detecto audio para analizar.');
   }
 
-  const deviceId = await getOrCreateDeviceId();
   const response = await fetch(`${supabaseUrl}/functions/v1/parse-meal-description`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${supabaseAnonKey}`,
-      'x-device-id': deviceId,
-    },
+    headers: await getRequestHeaders(),
     body: JSON.stringify({
       audioBase64,
       mimeType,
